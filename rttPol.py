@@ -5,7 +5,7 @@ from photutils.morphology import data_properties
 from photutils import EllipticalAperture
 import matplotlib.pylab as plt
 from matplotlib.colors import LogNorm
-from photutils.morphology import centroid_2dg
+# from photutils.morphology import centroid_2dg
 from photutils import EllipticalAnnulus
 from astropy.table import hstack, vstack
 from photutils import aperture_photometry
@@ -17,7 +17,7 @@ med_bias_data = fits.getdata('/home/pi/Kolchoz/'
 plots = True
 
 r_mask = 7
-r_multi_ap = 2.0
+r_multi_ap = 3.0
 r_ann_in = 1
 r_ann_out = 3
 
@@ -61,8 +61,8 @@ def makeApertures(data):
                                                 sigma=3.0, iters=5)
         print mean, median, std, im
         props = data_properties(data-np.uint64(median), mask=mask)
-        position = centroid_2dg(data, mask=mask)
-        # position = (props.xcentroid.value, props.ycentroid.value)
+        # position = centroid_2dg(data, mask=mask)
+        position = (props.xcentroid.value, props.ycentroid.value)
         a = props.semimajor_axis_sigma.value * r_multi_ap
         b = props.semiminor_axis_sigma.value * r_multi_ap
         theta = props.orientation.value
@@ -139,7 +139,6 @@ def saveTable(out_table):
     out_table.add_column(
         Column(name='COUNTS_ERR', data=out_table[output_flux]), index=1)
 
-    out_table.rename_column('JD', 'TIME')
     out_table.rename_column(output_filter, 'FILTER')
 
     out_table.add_column(
@@ -159,14 +158,51 @@ def saveTable(out_table):
 
     out_table.write('sax.txt', format='ascii', delimiter=',')
 
+    createFitsTable(out_table)
+
+
+def createFitsTable(tab):
+
+    columns_to_remove = ['residual_aperture_sum', 'residual_aperture_err_sum',
+                         'aperture_sum_raw', 'aperture_sum_bkg',
+                         'aperture_sum_err_raw', 'aperture_sum_err_bkg',
+                         'xcenter_raw', 'ycenter_raw',
+                         'xcenter_bkg', 'ycenter_bkg']
+
+    tab.remove_columns(columns_to_remove)
+
+    c1 = fits.Column(name='TIME', format='D', array=tab['TIME'])
+    c2 = fits.Column(name='COUNTS', format='D', array=tab['COUNTS'])
+    c3 = fits.Column(name='COUNTS_ERR', format='D', array=tab['COUNTS_ERR'])
+    c4 = fits.Column(name='FILTER', format='1A', array=tab['FILTER'])
+    c5 = fits.Column(name='ROTOR', format='1A', array=tab['ROTOR'])
+    c6 = fits.Column(name='PHASE', format='D', array=tab['PHASE'])
+    c7 = fits.Column(name='AIRMASS', format='D', array=tab['AIRMASS'])
+    c8 = fits.Column(name='ROTANGLE', format='D', array=tab['ROTANGLE'])
+    c9 = fits.Column(name='ROTSKYPA', format='D', array=tab['ROTSKYPA'])
+    c10 = fits.Column(name='EXPTIME', format='D', array=tab['EXPTIME'])
+    c11 = fits.Column(name='SEEING', format='D', array=tab['SEEING'])
+    c12 = fits.Column(name='MOON_FRAC', format='D', array=tab['MOON_FRAC'])
+    c13 = fits.Column(name='MOON_DIST', format='D', array=tab['MOON_DIST'])
+
+    cols = fits.ColDefs([c1, c2, c3, c4, c5, c6, c7,
+                         c8, c9, c10, c11, c12, c13])
+
+    tbhdu = fits.new_table(cols)
+    prihdr = fits.Header()
+    prihdu = fits.PrimaryHDU(header=prihdr)
+    thdulist = fits.HDUList([prihdu, tbhdu])
+
+    thdulist.writeto('sax.fits', clobber=True)
+
 
 if __name__ == "__main__":
 
     out_table = []
     for im in images:
-        hdr_table = Table(names=('JD', 'OBJECT', 'EXPTIME',
+        hdr_table = Table(names=('TIME', 'OBJECT', 'EXPTIME',
                                  'AFILTER', 'BFILTER', 'ROTOR'),
-                          dtype=('f8', 'S12', 'f8', 'S6', 'S10', 'i'))
+                          dtype=('f8', 'S8', 'f8', 'S6', 'S8', 'i'))
 
         if im.endswith(('.py', '.txt', '.png')):
             continue
