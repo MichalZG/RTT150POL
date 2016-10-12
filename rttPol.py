@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import astropy.io.fits as fits
 import glob
 import numpy as np
