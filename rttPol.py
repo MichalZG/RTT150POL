@@ -11,12 +11,12 @@ from astropy.table import hstack, vstack
 from photutils import aperture_photometry
 from astropy.table import Table, Column
 from astropy.stats import sigma_clipped_stats
+import argparse
+import warnings
 
-med_bias_data = fits.getdata('/home/pi/Kolchoz/'
-                             'RTT150/20160806RTT150/20160805/bdf/med_bias.fits')
-plots = True
+warnings.filterwarnings('ignore')
 
-r_mask = 7
+r_mask = 10
 r_multi_ap = 3.0
 r_ann_in = 1
 r_ann_out = 3
@@ -36,11 +36,10 @@ output_flux = 'residual_aperture_sum'
 outpur_flux_err = 'residual_aperture_err_sum'
 # AFILTER or BFILTER
 output_filter = 'AFILTER'
-images = sorted(glob.glob('*'))
+images = sorted(glob.glob('*00*'))
 
 
-def createMask(pos):
-
+def createMask(pos, data_shape):
     y, x = np.ogrid[-pos[1]:data_shape[0]-pos[1],
                     -pos[0]:data_shape[1]-pos[0]]
     mask = x*x + y*y <= r_mask*r_mask
@@ -51,15 +50,11 @@ def createMask(pos):
 
 
 def makeApertures(data):
-
     apertures = []
-    # data -= mean * 0.8
-    # data[np.where(data <= 0)] = 1
 
-    for mask in reversed(map(createMask, stars_pos)):
+    for mask in reversed([createMask(pos, data.shape) for pos in stars_pos]):
         mean, median, std = sigma_clipped_stats(data, mask=mask,
                                                 sigma=3.0, iters=5)
-        print mean, median, std, im
         props = data_properties(data-np.uint64(median), mask=mask)
         # position = centroid_2dg(data, mask=mask)
         position = (props.xcentroid.value, props.ycentroid.value)
@@ -105,12 +100,12 @@ def makePhot(data, hdr, plot=True):
     out_table = vstack(out_table)
 
     if plot:
-        makePlot(data, apertures)
+        makePlot(data, apertures, hdr['FILENAME'])
 
     return out_table
 
 
-def calcPhotErr():
+def calcPhotErr(hdr):
     try:
         effective_gain = float(hdr[gain_key])
     except KeyError:
@@ -120,13 +115,13 @@ def calcPhotErr():
     # error = calc_total_error(data, sky_sigma, effective_gain)
 
 
-def makePlot(data, apertures):
+def makePlot(data, apertures, im_name):
     plt.imshow(data, cmap='Greys', origin='lower',
                norm=LogNorm())
     for aperture in apertures:
         aperture[0].plot(linewidth=0.3, color='#d62728')
         aperture[1].plot(fill=False, linewidth=0.3, color='k')
-    plt.savefig(im+'.png', dpi=300)
+    plt.savefig(im_name+'.png', dpi=300)
     plt.clf()
 
 
@@ -137,7 +132,7 @@ def saveTable(out_table):
     out_table.add_column(
         Column(name='COUNTS', data=out_table[output_flux]), index=0)
     out_table.add_column(
-        Column(name='COUNTS_ERR', data=out_table[output_flux]), index=1)
+        Column(name='COUNTS_ERR', data=[1]*len(out_table)), index=1)
 
     out_table.rename_column(output_filter, 'FILTER')
 
@@ -196,40 +191,80 @@ def createFitsTable(tab):
     thdulist.writeto('sax.fits', clobber=True)
 
 
-if __name__ == "__main__":
+def loadImages():
+    import os
+    work_dir = os.path.curdir
+    images = sorted(glob.glob(
+        os.path.join(work_dir, '*')))
+    images = [name for name in images if len(name.split('.')) < 3]
+    return images
+
+
+def loadBias(biasDir):
+
+    bias_data = fits.getdata(biasDir)
+
+    return bias_data
+
+
+def createHdrTable(hdr):
+
+    hdr_table = Table(names=('TIME', 'OBJECT', 'EXPTIME',
+                             'AFILTER', 'BFILTER', 'ROTOR'),
+                      dtype=('f8', 'S8', 'f8', 'S6', 'S8', 'i'))
+
+    for i in xrange(4):
+        hdr_table.add_row([float(hdr[jd_key]),
+                           hdr[obj_key],
+                           float(hdr[exp_key]),
+                           hdr[afilter_key].strip()[0],
+                           hdr[bfilter_key].strip()[0],
+                           i+1])
+    return hdr_table
+
+
+def main(args):
 
     out_table = []
+    images = loadImages()
+
+    if args.bias:
+        bias_data = loadBias(args.bias)
+
     for im in images:
-        hdr_table = Table(names=('TIME', 'OBJECT', 'EXPTIME',
-                                 'AFILTER', 'BFILTER', 'ROTOR'),
-                          dtype=('f8', 'S8', 'f8', 'S6', 'S8', 'i'))
 
-        if im.endswith(('.py', '.txt', '.png')):
-            continue
         hdu = fits.open(im, mode='update', ignore_missing_end=True)
-        data_shape = hdu[0].data.shape
 
-        try:
-            hdu[0].header['BIASCORR']
+        if args.bias:
+            try:
+                hdu[0].header['BIASCORR']
+                print('%s - Bias correction already done' % im)
 
-        except KeyError:
-            hdu[0].data = hdu[0].data - med_bias_data
-            hdu[0].header['BIASCORR'] = 'True'
-            print 'bias corr done'
+            except KeyError:
+                hdu[0].data = hdu[0].data - bias_data
+                hdu[0].header['BIASCORR'] = 'True'
+                print('%s - Bias correction done' % im)
 
-        hdu.flush()
+            hdu.flush()
 
         data = np.copy(hdu[0].data)
         hdr = hdu[0].header
 
-        for i in xrange(4):
-            hdr_table.add_row([float(hdr[jd_key]),
-                               hdr[obj_key],
-                               float(hdr[exp_key]),
-                               hdr[afilter_key].strip()[0],
-                               hdr[bfilter_key].strip()[0],
-                               i+1])
-
-        phot_table = makePhot(data, hdr, plot=True)
+        hdr_table = createHdrTable(hdr)
+        phot_table = makePhot(data, hdr, plot=args.plot)
         out_table.append(hstack([hdr_table, phot_table]))
     saveTable(out_table)
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description='Make RTTPOL photometry')
+    parser.add_argument('-v', '--verbose', action='store_true')
+    parser.add_argument('-p', '--plot', action='store_true',
+                        help='If set program will make plots')
+    parser.add_argument('--bias', type=str, const='masterBias.fits',
+                        nargs='?', help='If set bias correction = ON, '
+                                        'Default: %(const)s')
+    args = parser.parse_args()
+
+    main(args)
