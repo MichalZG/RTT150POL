@@ -6,7 +6,6 @@ import numpy as np
 from photutils.morphology import data_properties
 from photutils import EllipticalAperture
 import warnings
-# from photutils.morphology import centroid_2dg
 from photutils import EllipticalAnnulus
 from astropy.table import hstack, vstack
 from photutils import aperture_photometry
@@ -51,6 +50,7 @@ class Config():
         self.r_multi_ap = config.getfloat('photometry', 'r_multi_ap')
         self.r_ann_in = config.getfloat('photometry', 'r_ann_in')
         self.r_ann_out = config.getfloat('photometry', 'r_ann_out')
+        self.fit_2D_gauss = config.getboolean('photometry', 'fit_2D_gauss')
 
         # regions
         self.stars_file = config.get('stars', 'stars_file')
@@ -77,8 +77,12 @@ def makeApertures(data, stars):
         mean, median, std = sigma_clipped_stats(data, mask=mask,
                                                 sigma=3.0, iters=5)
         props = data_properties(data-np.uint64(median), mask=mask)
-        # position = centroid_2dg(data, mask=mask)
-        position = (props.xcentroid.value, props.ycentroid.value)
+
+        if cfg.fit_2D_gauss:
+            position = centroid_2dg(data, mask=mask)
+        else:
+            position = (props.xcentroid.value, props.ycentroid.value)
+
         a = props.semimajor_axis_sigma.value * cfg.r_multi_ap
         b = props.semiminor_axis_sigma.value * cfg.r_multi_ap
         theta = props.orientation.value
@@ -312,5 +316,8 @@ if __name__ == "__main__":
                                         '(fits and csv) and plots, '
                                         'Default: %(const)s')
     args = parser.parse_args()
+
+    if cfg.fit_2D_gauss:
+        from photutils.morphology import centroid_2dg
 
     main(args)
