@@ -5,8 +5,7 @@ import glob
 import numpy as np
 from photutils.morphology import data_properties
 from photutils import EllipticalAperture
-import matplotlib.pylab as plt
-from matplotlib.colors import LogNorm
+import warnings
 # from photutils.morphology import centroid_2dg
 from photutils import EllipticalAnnulus
 from astropy.table import hstack, vstack
@@ -14,12 +13,11 @@ from photutils import aperture_photometry
 from astropy.table import Table, Column
 from astropy.stats import sigma_clipped_stats
 import argparse
-import warnings
 import ConfigParser
 import os
 import sys
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore", module="matplotlib")
 
 
 class Config():
@@ -57,6 +55,10 @@ class Config():
         # regions
         self.stars_file = config.get('stars', 'stars_file')
 
+        # default
+        self.bias_name = config.get('default', 'bias_name')
+        self.output_name = config.get('default', 'output_name')
+
 
 def createMask(star, data_shape):
     y, x = np.ogrid[-star[1]:data_shape[0]-star[1],
@@ -82,7 +84,7 @@ def makeApertures(data, stars):
         theta = props.orientation.value
         aperture = EllipticalAperture(position, a, b, theta=theta)
         annulus = EllipticalAnnulus(position, a+cfg.r_ann_in, a+cfg.r_ann_out,
-                                    b+cfg.r_ann_out, theta=theta)
+                                    +cfg.r_ann_out, theta=theta)
         apertures.append([aperture, annulus])
 
     return apertures
@@ -125,6 +127,7 @@ def makePhot(data, hdr, stars, plot=True):
 
 
 def calcPhotErr(hdr):
+
     try:
         effective_gain = float(hdr[cfg.gain_key])
     except KeyError:
@@ -135,6 +138,10 @@ def calcPhotErr(hdr):
 
 
 def makePlot(data, apertures, im_name):
+
+    import matplotlib.pylab as plt
+    from matplotlib.colors import LogNorm
+
     plt.imshow(data, cmap='Greys', origin='lower',
                norm=LogNorm())
     for aperture in apertures:
@@ -144,7 +151,7 @@ def makePlot(data, apertures, im_name):
     plt.clf()
 
 
-def saveTable(out_table):
+def saveTable(out_table, output_name):
 
     out_table = vstack(out_table)
 
@@ -170,12 +177,12 @@ def saveTable(out_table):
     out_table.add_column(
         Column(name='MOON_DIST', data=[0]*len(out_table)))
 
-    out_table.write('sax.txt', format='ascii', delimiter=',')
+    out_table.write(output_name+'.txt', format='ascii', delimiter=',')
 
-    createFitsTable(out_table)
+    saveToFitsTable(out_table, output_name)
 
 
-def createFitsTable(tab):
+def saveToFitsTable(tab, output_name):
 
     columns_to_remove = ['residual_aperture_sum', 'residual_aperture_err_sum',
                          'aperture_sum_raw', 'aperture_sum_bkg',
@@ -202,12 +209,12 @@ def createFitsTable(tab):
     cols = fits.ColDefs([c1, c2, c3, c4, c5, c6, c7,
                          c8, c9, c10, c11, c12, c13])
 
-    tbhdu = fits.new_table(cols)
+    tbhdu = fits.BinTableHDU.from_columns(cols)
     prihdr = fits.Header()
     prihdu = fits.PrimaryHDU(header=prihdr)
     thdulist = fits.HDUList([prihdu, tbhdu])
 
-    thdulist.writeto('sax.fits', clobber=True)
+    thdulist.writeto(output_name+'.fits', clobber=True)
 
 
 def loadImages():
@@ -285,18 +292,24 @@ def main(args):
         hdr_table = createHdrTable(hdr)
         phot_table = makePhot(data, hdr, stars, plot=args.plot)
         out_table.append(hstack([hdr_table, phot_table]))
-    saveTable(out_table)
+
+    saveTable(out_table, args.output)
 
 
 if __name__ == "__main__":
 
     cfg = Config()
-    parser = argparse.ArgumentParser(description='Make RTTPOL photometry')
+    parser = argparse.ArgumentParser(description='RTTPOL photometry')
     parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('-p', '--plot', action='store_true',
                         help='If set program will make plots')
-    parser.add_argument('--bias', type=str, const='masterBias.fits',
+    parser.add_argument('--bias', type=str, const=cfg.bias_name,
                         nargs='?', help='If set bias correction = ON, '
+                                        'Default: %(const)s')
+    parser.add_argument('--output', type=str, const=cfg.output_name,
+                        default='output',
+                        nargs='?', help='Names of the output tables'
+                                        '(fits and csv) and plots, '
                                         'Default: %(const)s')
     args = parser.parse_args()
 
