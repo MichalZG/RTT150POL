@@ -15,65 +15,82 @@ from astropy.table import Table, Column
 from astropy.stats import sigma_clipped_stats
 import argparse
 import warnings
+import ConfigParser
+import os
+import sys
 
 warnings.filterwarnings('ignore')
 
-r_mask = 10
-r_multi_ap = 3.0
-r_ann_in = 1
-r_ann_out = 3
 
-gain_key = 'GAIN'
-jd_key = 'JD_TCS'
-exp_key = 'EXPTIME'
-obj_key = 'OBJECT'
-afilter_key = 'AFILTERW'
-bfilter_key = 'BFILTERW'
+class Config():
 
-# saxj2103
-stars_pos = [[506.0, 337.4], [507.4, 247.7], [507.9, 149.3], [507.0, 61.4]]
-# flux to output as COUNTS
-# residual_aperture_sum or aperture_sum_raw or aperture_sum_bkg
-output_flux = 'residual_aperture_sum'
-outpur_flux_err = 'residual_aperture_err_sum'
-# AFILTER or BFILTER
-output_filter = 'AFILTER'
-images = sorted(glob.glob('*00*'))
+    def __init__(self):
+
+        config = ConfigParser.RawConfigParser()
+        config.read(os.path.join(
+            os.path.dirname(os.path.realpath(__file__)),
+            'config.cfg'))
+        self.config = config
+
+        # images
+        self.images = config.get('images', 'images')
+
+        # flux
+        self.output_flux = config.get('flux', 'flux')
+        self.output_flux = config.get('flux', 'flux_err')
+        self.output_filter = config.get('flux', 'filter')
+
+        # header
+        self.gain_key = config.get('header', 'gain')
+        self.jd_key = config.get('header', 'jd')
+        self.exp_key = config.get('header', 'exp')
+        self.obj_key = config.get('header', 'obj')
+        self.afilter_key = config.get('header', 'afilter')
+        self.bfilter_key = config.get('header', 'bfilter')
+
+        # photometry
+        self.r_mask = config.getfloat('photometry', 'r_mask')
+        self.r_multi_ap = config.getfloat('photometry', 'r_multi_ap')
+        self.r_ann_in = config.getfloat('photometry', 'r_ann_in')
+        self.r_ann_out = config.getfloat('photometry', 'r_ann_out')
+
+        # regions
+        self.stars_file = config.get('stars', 'stars_file')
 
 
-def createMask(pos, data_shape):
-    y, x = np.ogrid[-pos[1]:data_shape[0]-pos[1],
-                    -pos[0]:data_shape[1]-pos[0]]
-    mask = x*x + y*y <= r_mask*r_mask
+def createMask(star, data_shape):
+    y, x = np.ogrid[-star[1]:data_shape[0]-star[1],
+                    -star[0]:data_shape[1]-star[0]]
+    mask = x * x + y * y <= cfg.r_mask * cfg.r_mask
     mask_arr = np.full(data_shape, True, dtype=bool)
     mask_arr[mask] = False
 
     return mask_arr
 
 
-def makeApertures(data):
+def makeApertures(data, stars):
     apertures = []
 
-    for mask in reversed([createMask(pos, data.shape) for pos in stars_pos]):
+    for mask in reversed([createMask(star, data.shape) for star in stars]):
         mean, median, std = sigma_clipped_stats(data, mask=mask,
                                                 sigma=3.0, iters=5)
         props = data_properties(data-np.uint64(median), mask=mask)
         # position = centroid_2dg(data, mask=mask)
         position = (props.xcentroid.value, props.ycentroid.value)
-        a = props.semimajor_axis_sigma.value * r_multi_ap
-        b = props.semiminor_axis_sigma.value * r_multi_ap
+        a = props.semimajor_axis_sigma.value * cfg.r_multi_ap
+        b = props.semiminor_axis_sigma.value * cfg.r_multi_ap
         theta = props.orientation.value
         aperture = EllipticalAperture(position, a, b, theta=theta)
-        annulus = EllipticalAnnulus(position, a+r_ann_in, a+r_ann_out,
-                                    b+r_ann_out, theta=theta)
+        annulus = EllipticalAnnulus(position, a+cfg.r_ann_in, a+cfg.r_ann_out,
+                                    b+cfg.r_ann_out, theta=theta)
         apertures.append([aperture, annulus])
 
     return apertures
 
 
-def makePhot(data, hdr, plot=True):
+def makePhot(data, hdr, stars, plot=True):
 
-    apertures = makeApertures(data)
+    apertures = makeApertures(data, stars)
     out_table = []
 
     for aperture in apertures:
@@ -109,7 +126,7 @@ def makePhot(data, hdr, plot=True):
 
 def calcPhotErr(hdr):
     try:
-        effective_gain = float(hdr[gain_key])
+        effective_gain = float(hdr[cfg.gain_key])
     except KeyError:
         effective_gain = 1.0
     return effective_gain
@@ -132,11 +149,11 @@ def saveTable(out_table):
     out_table = vstack(out_table)
 
     out_table.add_column(
-        Column(name='COUNTS', data=out_table[output_flux]), index=0)
+        Column(name='COUNTS', data=out_table[cfg.output_flux]), index=0)
     out_table.add_column(
         Column(name='COUNTS_ERR', data=[1]*len(out_table)), index=1)
 
-    out_table.rename_column(output_filter, 'FILTER')
+    out_table.rename_column(cfg.output_filter, 'FILTER')
 
     out_table.add_column(
         Column(name='PHASE', data=[0]*len(out_table)))
@@ -194,12 +211,24 @@ def createFitsTable(tab):
 
 
 def loadImages():
-    import os
-    work_dir = os.path.curdir
+
     images = sorted(glob.glob(
-        os.path.join(work_dir, '*')))
+        os.path.join(os.path.curdir, cfg.images)))
     images = [name for name in images if len(name.split('.')) < 3]
+
     return images
+
+
+def loadStars():
+
+    try:
+        stars = np.loadtxt(
+            os.path.join(os.path.curdir, cfg.stars_file), dtype='f')
+    except IOError:
+        print('NO REGION FILE!')
+        sys.exit()
+
+    return stars
 
 
 def loadBias(biasDir):
@@ -216,11 +245,11 @@ def createHdrTable(hdr):
                       dtype=('f8', 'S8', 'f8', 'S6', 'S8', 'i'))
 
     for i in xrange(4):
-        hdr_table.add_row([float(hdr[jd_key]),
-                           hdr[obj_key],
-                           float(hdr[exp_key]),
-                           hdr[afilter_key].strip()[0],
-                           hdr[bfilter_key].strip()[0],
+        hdr_table.add_row([float(hdr[cfg.jd_key]),
+                           hdr[cfg.obj_key],
+                           float(hdr[cfg.exp_key]),
+                           hdr[cfg.afilter_key].strip()[0],
+                           hdr[cfg.bfilter_key].strip()[0],
                            i+1])
     return hdr_table
 
@@ -229,6 +258,7 @@ def main(args):
 
     out_table = []
     images = loadImages()
+    stars = loadStars()
 
     if args.bias:
         bias_data = loadBias(args.bias)
@@ -253,13 +283,14 @@ def main(args):
         hdr = hdu[0].header
 
         hdr_table = createHdrTable(hdr)
-        phot_table = makePhot(data, hdr, plot=args.plot)
+        phot_table = makePhot(data, hdr, stars, plot=args.plot)
         out_table.append(hstack([hdr_table, phot_table]))
     saveTable(out_table)
 
 
 if __name__ == "__main__":
 
+    cfg = Config()
     parser = argparse.ArgumentParser(description='Make RTTPOL photometry')
     parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('-p', '--plot', action='store_true',
