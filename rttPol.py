@@ -15,6 +15,7 @@ import argparse
 import ConfigParser
 import os
 import sys
+import math
 
 warnings.filterwarnings("ignore", module="matplotlib")
 
@@ -89,7 +90,7 @@ def makeApertures(data, stars):
         aperture = EllipticalAperture(position, a, b, theta=theta)
         annulus = EllipticalAnnulus(position, a+cfg.r_ann_in, a+cfg.r_ann_out,
                                     +cfg.r_ann_out, theta=theta)
-        apertures.append([aperture, annulus])
+        apertures.append([aperture, annulus, std])
 
     return apertures
 
@@ -100,10 +101,8 @@ def makePhot(data, hdr, stars, plot=True):
     out_table = []
 
     for aperture in apertures:
-        rawflux_table = aperture_photometry(data, aperture[0],
-                                            error=np.sqrt(data))
-        bkgflux_table = aperture_photometry(data, aperture[1],
-                                            error=np.sqrt(data))
+        rawflux_table = aperture_photometry(data, aperture[0])
+        bkgflux_table = aperture_photometry(data, aperture[1])
         phot_table = hstack([rawflux_table, bkgflux_table],
                             table_names=['raw', 'bkg'])
         bkg_mean = phot_table['aperture_sum_bkg'] / aperture[1].area()
@@ -111,11 +110,11 @@ def makePhot(data, hdr, stars, plot=True):
         final_sum = phot_table['aperture_sum_raw'] - bkg_sum
         phot_table['residual_aperture_sum'] = final_sum
 
-        err_column = np.sqrt(np.power(phot_table['aperture_sum_err_raw'], 2) +
-                             np.power(phot_table['aperture_sum_err_bkg'], 2))
         phot_table.add_column(
             Column(name='residual_aperture_err_sum',
-                   data=err_column))
+                   data=calcPhotErr(hdr, aperture,
+                                    rawflux_table, bkgflux_table)))
+
         phot_table['xcenter_raw'].shape = 1
         phot_table['ycenter_raw'].shape = 1
         phot_table['xcenter_bkg'].shape = 1
@@ -130,15 +129,19 @@ def makePhot(data, hdr, stars, plot=True):
     return out_table
 
 
-def calcPhotErr(hdr):
+def calcPhotErr(hdr, aperture, rawflux_table, bkgflux_table):
 
     try:
         effective_gain = float(hdr[cfg.gain_key])
     except KeyError:
         effective_gain = 1.0
-    return effective_gain
-    # sky_level, sky_sigma = background(data)
-    # error = calc_total_error(data, sky_sigma, effective_gain)
+    err = math.sqrt(
+        rawflux_table['aperture_sum'] / effective_gain +
+        aperture[0].area() * aperture[2] ** 2 +
+        (aperture[0].area() ** 2 + aperture[2] ** 2) /
+        bkgflux_table['aperture_sum'])
+    print err
+    return [err]
 
 
 def makePlot(data, apertures, im_name):
