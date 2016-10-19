@@ -35,7 +35,7 @@ class Config():
 
         # flux
         self.output_flux = config.get('flux', 'flux')
-        self.output_flux = config.get('flux', 'flux_err')
+        self.output_flux_err = config.get('flux', 'flux_err')
         self.output_filter = config.get('flux', 'filter')
 
         # header
@@ -65,8 +65,8 @@ class Config():
 
 
 def createMask(star, data_shape):
-    y, x = np.ogrid[-star[1]:data_shape[0]-star[1],
-                    -star[0]:data_shape[1]-star[0]]
+    y, x = np.ogrid[-star[1]-1:data_shape[0]-star[1]-1,
+                    -star[0]-1:data_shape[1]-star[0]-1]
     mask = x * x + y * y <= cfg.r_mask * cfg.r_mask
     mask_arr = np.full(data_shape, True, dtype=bool)
     mask_arr[mask] = False
@@ -76,35 +76,40 @@ def createMask(star, data_shape):
 
 def makeApertures(data, stars):
     apertures = []
+    masks = [createMask(star, data.shape) for star in stars]
 
-    for mask in reversed([createMask(star, data.shape) for star in stars]):
+    for i, mask in enumerate(reversed(masks)):
         mean, median, std = sigma_clipped_stats(data, mask=mask,
-                                                sigma=3.0, iters=5)
+                                                sigma=1.0, iters=5)
+
+        if cfg.calc_center or cfg.calc_aperture:
+            props = data_properties(data-np.uint64(median), mask=mask)
 
         if cfg.calc_center:
 
             if cfg.fit_2D_gauss:
-                position = centroid_2dg(data, mask=mask)
+                position = centroid_2dg(data-np.uint64(median), mask=mask)
             else:
-                props = data_properties(data-np.uint64(median), mask=mask)
                 position = (props.xcentroid.value, props.ycentroid.value)
         else:
-            position = star
+            position = stars[i]
 
         if cfg.calc_aperture:
             a = props.semimajor_axis_sigma.value * cfg.r_multi_ap
             b = props.semiminor_axis_sigma.value * cfg.r_multi_ap
             theta = props.orientation.value
-            aperture = EllipticalAperture(position, a, b, theta=theta)
+            aperture = EllipticalAperture(position, a=a, b=b, theta=theta)
             annulus = EllipticalAnnulus(position,
                                         a_in=a+cfg.r_ann_in,
                                         a_out=a+cfg.r_ann_out,
-                                        b_out=cfg.r_ann_out,
+                                        b_out=b+cfg.r_ann_out,
                                         theta=theta)
+            print('i:{}, a:{}, b:{}, pos:{},{}').format(i+1, a, b, *position)
         else:
             aperture = CircularAperture(position, r=cfg.r_ap)
-            annulus = CircularAnnulus(position, r_in=cfg.r_ann_in,
-                                      r_out=cfg.r_ann_out)
+            annulus = CircularAnnulus(position,
+                                      r_in=cfg.r_ap+cfg.r_ann_in,
+                                      r_out=cfg.r_ap+cfg.r_ann_out)
 
         apertures.append([aperture, annulus, std])
 
@@ -129,7 +134,7 @@ def makePhot(data, hdr, stars, plot=True):
         phot_table.add_column(
             Column(name='residual_aperture_err_sum',
                    data=calcPhotErr(hdr, aperture,
-                                    rawflux_table, bkgflux_table)))
+                                    phot_table, bkgflux_table)))
 
         phot_table['xcenter_raw'].shape = 1
         phot_table['ycenter_raw'].shape = 1
@@ -145,18 +150,19 @@ def makePhot(data, hdr, stars, plot=True):
     return out_table
 
 
-def calcPhotErr(hdr, aperture, rawflux_table, bkgflux_table):
+def calcPhotErr(hdr, aperture, phot_table, bkgflux_table):
 
     try:
         effective_gain = float(hdr[cfg.gain_key])
     except KeyError:
         effective_gain = 1.0
+
     err = math.sqrt(
-        rawflux_table['aperture_sum'] / effective_gain +
-        aperture[0].area() * aperture[2] ** 2 +
-        (aperture[0].area() ** 2 + aperture[2] ** 2) /
-        bkgflux_table['aperture_sum'])
-    print err
+        (phot_table['residual_aperture_sum'] / effective_gain) +
+        (aperture[0].area() * aperture[2] ** 2) +
+        ((aperture[0].area() ** 2 + aperture[2] ** 2) /
+         (bkgflux_table['aperture_sum'] * aperture[0].area())))
+
     return [err]
 
 
@@ -181,7 +187,8 @@ def saveTable(out_table, output_name):
     out_table.add_column(
         Column(name='COUNTS', data=out_table[cfg.output_flux]), index=0)
     out_table.add_column(
-        Column(name='COUNTS_ERR', data=[1]*len(out_table)), index=1)
+        Column(name='COUNTS_ERR', data=out_table['residual_aperture_err_sum']),
+        index=1)
 
     out_table.rename_column(cfg.output_filter, 'FILTER')
 
@@ -200,17 +207,15 @@ def saveTable(out_table, output_name):
     out_table.add_column(
         Column(name='MOON_DIST', data=[0]*len(out_table)))
 
-    out_table.write(output_name+'.txt', format='ascii', delimiter=',')
+    out_table.write(output_name+'.csv', format='ascii', delimiter=',')
 
     saveToFitsTable(out_table, output_name)
 
 
 def saveToFitsTable(tab, output_name):
 
-    columns_to_remove = ['residual_aperture_sum', 'residual_aperture_err_sum',
-                         'aperture_sum_raw', 'aperture_sum_bkg',
-                         'aperture_sum_err_raw', 'aperture_sum_err_bkg',
-                         'xcenter_raw', 'ycenter_raw',
+    columns_to_remove = ['residual_aperture_sum', 'aperture_sum_raw',
+                         'aperture_sum_bkg', 'xcenter_raw', 'ycenter_raw',
                          'xcenter_bkg', 'ycenter_bkg']
 
     tab.remove_columns(columns_to_remove)
@@ -294,7 +299,7 @@ def main(args):
         bias_data = loadBias(args.bias)
 
     for im in images:
-
+        print im
         hdu = fits.open(im, mode='update', ignore_missing_end=True)
 
         if args.bias:
