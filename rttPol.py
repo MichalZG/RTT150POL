@@ -3,9 +3,11 @@
 import astropy.io.fits as fits
 import glob
 import numpy as np
-from photutils.morphology import data_properties
+from photutils import source_properties, properties_table
 from photutils import CircularAperture, EllipticalAperture
 from photutils import CircularAnnulus, EllipticalAnnulus
+from photutils import detect_sources
+from astropy.convolution import Gaussian2DKernel
 import warnings
 from astropy.table import hstack, vstack
 from photutils import aperture_photometry
@@ -83,21 +85,33 @@ def makeApertures(data, stars):
                                                 sigma=1.0, iters=5)
 
         if cfg.calc_center or cfg.calc_aperture:
-            props = data_properties(data-np.uint64(median), mask=mask)
+
+            from astropy.stats import gaussian_fwhm_to_sigma
+
+            sigma = 2.0 * gaussian_fwhm_to_sigma    # FWHM = 2.
+            kernel = Gaussian2DKernel(sigma, x_size=3, y_size=3)
+            kernel.normalize()
+            masked_data = np.copy(data)
+            masked_data[mask] = 0
+            segm = detect_sources(masked_data, median*2, npixels=5,
+                                  filter_kernel=kernel)
+            props = properties_table(
+                source_properties(data-np.uint64(median), segm))
 
         if cfg.calc_center:
 
             if cfg.fit_2D_gauss:
                 position = centroid_2dg(data-np.uint64(median), mask=mask)
             else:
-                position = (props.xcentroid.value, props.ycentroid.value)
+                position = (props[0]['xcentroid'],
+                            props[0]['ycentroid'])
         else:
             position = stars[i]
 
         if cfg.calc_aperture:
-            a = props.semimajor_axis_sigma.value * cfg.r_multi_ap
-            b = props.semiminor_axis_sigma.value * cfg.r_multi_ap
-            theta = props.orientation.value
+            a = props[0]['semimajor_axis_sigma'] * cfg.r_multi_ap
+            b = props[0]['semiminor_axis_sigma'] * cfg.r_multi_ap
+            theta = props[0]['orientation']
             aperture = EllipticalAperture(position, a=a, b=b, theta=theta)
             annulus = EllipticalAnnulus(position,
                                         a_in=a+cfg.r_ann_in,
