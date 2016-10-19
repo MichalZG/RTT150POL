@@ -4,9 +4,9 @@ import astropy.io.fits as fits
 import glob
 import numpy as np
 from photutils.morphology import data_properties
-from photutils import EllipticalAperture
+from photutils import CircularAperture, EllipticalAperture
+from photutils import CircularAnnulus, EllipticalAnnulus
 import warnings
-from photutils import EllipticalAnnulus
 from astropy.table import hstack, vstack
 from photutils import aperture_photometry
 from astropy.table import Table, Column
@@ -47,10 +47,13 @@ class Config():
         self.bfilter_key = config.get('header', 'bfilter')
 
         # photometry
+        self.calc_aperture = config.getboolean('photometry', 'calc_aperture')
+        self.r_ap = config.getfloat('photometry', 'r_ap')
         self.r_mask = config.getfloat('photometry', 'r_mask')
         self.r_multi_ap = config.getfloat('photometry', 'r_multi_ap')
         self.r_ann_in = config.getfloat('photometry', 'r_ann_in')
         self.r_ann_out = config.getfloat('photometry', 'r_ann_out')
+        self.calc_center = config.getboolean('photometry', 'calc_center')
         self.fit_2D_gauss = config.getboolean('photometry', 'fit_2D_gauss')
 
         # regions
@@ -77,19 +80,32 @@ def makeApertures(data, stars):
     for mask in reversed([createMask(star, data.shape) for star in stars]):
         mean, median, std = sigma_clipped_stats(data, mask=mask,
                                                 sigma=3.0, iters=5)
-        props = data_properties(data-np.uint64(median), mask=mask)
 
-        if cfg.fit_2D_gauss:
-            position = centroid_2dg(data, mask=mask)
+        if cfg.calc_center:
+
+            if cfg.fit_2D_gauss:
+                position = centroid_2dg(data, mask=mask)
+            else:
+                props = data_properties(data-np.uint64(median), mask=mask)
+                position = (props.xcentroid.value, props.ycentroid.value)
         else:
-            position = (props.xcentroid.value, props.ycentroid.value)
+            position = star
 
-        a = props.semimajor_axis_sigma.value * cfg.r_multi_ap
-        b = props.semiminor_axis_sigma.value * cfg.r_multi_ap
-        theta = props.orientation.value
-        aperture = EllipticalAperture(position, a, b, theta=theta)
-        annulus = EllipticalAnnulus(position, a+cfg.r_ann_in, a+cfg.r_ann_out,
-                                    +cfg.r_ann_out, theta=theta)
+        if cfg.calc_aperture:
+            a = props.semimajor_axis_sigma.value * cfg.r_multi_ap
+            b = props.semiminor_axis_sigma.value * cfg.r_multi_ap
+            theta = props.orientation.value
+            aperture = EllipticalAperture(position, a, b, theta=theta)
+            annulus = EllipticalAnnulus(position,
+                                        a_in=a+cfg.r_ann_in,
+                                        a_out=a+cfg.r_ann_out,
+                                        b_out=cfg.r_ann_out,
+                                        theta=theta)
+        else:
+            aperture = CircularAperture(position, r=cfg.r_ap)
+            annulus = CircularAnnulus(position, r_in=cfg.r_ann_in,
+                                      r_out=cfg.r_ann_out)
+
         apertures.append([aperture, annulus, std])
 
     return apertures
