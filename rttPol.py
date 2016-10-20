@@ -56,7 +56,6 @@ class Config():
         self.r_ann_in = config.getfloat('photometry', 'r_ann_in')
         self.r_ann_out = config.getfloat('photometry', 'r_ann_out')
         self.calc_center = config.getboolean('photometry', 'calc_center')
-        self.fit_2D_gauss = config.getboolean('photometry', 'fit_2D_gauss')
 
         # regions
         self.stars_file = config.get('stars', 'stars_file')
@@ -100,11 +99,8 @@ def makeApertures(data, stars):
 
         if cfg.calc_center:
 
-            if cfg.fit_2D_gauss:
-                position = centroid_2dg(data-np.uint64(median), mask=mask)
-            else:
-                position = (props[0]['xcentroid'],
-                            props[0]['ycentroid'])
+            position = (props[0]['xcentroid'],
+                        props[0]['ycentroid'])
         else:
             position = stars[i]
 
@@ -354,8 +350,5 @@ if __name__ == "__main__":
                                         '(fits and csv) and plots, '
                                         'Default: %(const)s')
     args = parser.parse_args()
-
-    if cfg.fit_2D_gauss:
-        from photutils.morphology import centroid_2dg
 
     main(args)
