@@ -186,6 +186,9 @@ def makePlot(data, apertures, im_name):
     for aperture in apertures:
         aperture[0].plot(linewidth=0.3, color='#d62728')
         aperture[1].plot(fill=False, linewidth=0.3, color='k')
+        area = aperture[0]  # for plot mask area
+        area.a, area.b = cfg.r_mask, cfg.r_mask
+        area.plot(linewidth=0.2, color='k', ls=':')
     plt.savefig(im_name+'.png', dpi=300)
     plt.clf()
 
@@ -287,14 +290,15 @@ def createHdrTable(hdr):
 
     hdr_table = Table(names=('TIME', 'OBJECT', 'EXPTIME',
                              'AFILTER', 'BFILTER', 'ROTOR'),
-                      dtype=('f8', 'S8', 'f8', 'S6', 'S8', 'i'))
+                      dtype=('f8', 'S8', 'f8',
+                             'S8', 'S8', 'i'))
 
-    for i in xrange(4):
+    for i in xrange(4):  # FIXME
         hdr_table.add_row([float(hdr[cfg.jd_key]),
                            hdr[cfg.obj_key],
                            float(hdr[cfg.exp_key]),
-                           hdr[cfg.afilter_key].strip()[0],
-                           hdr[cfg.bfilter_key].strip()[0],
+                           hdr[cfg.afilter_key].strip()[-1],
+                           hdr[cfg.bfilter_key].strip().split(' ')[-1],
                            i+1])
     return hdr_table
 
