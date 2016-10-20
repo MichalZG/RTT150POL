@@ -21,6 +21,7 @@ import math
 import matplotlib.pylab as plt
 from matplotlib.colors import LogNorm
 from astropy.stats import gaussian_fwhm_to_sigma
+import random
 
 warnings.filterwarnings("ignore", module="matplotlib")
 
@@ -95,8 +96,9 @@ def makeProps(data, median, mask, star):
 
         if len(props) > 1:
             props = findNearestObject(star, props, data.shape)
-
-        return props
+            return props
+        else:
+            return props[0]
 
 
 def findNearestObject(star, props, data_shape):
@@ -300,6 +302,7 @@ def loadStars():
     try:
         stars = np.loadtxt(
             os.path.join(os.path.curdir, cfg.stars_file), dtype='f')
+        stars = stars[np.argsort(stars[:, 1])]  # sort by y-axis
     except IOError:
         print('NO REGION FILE!')
         sys.exit()
@@ -324,10 +327,13 @@ def createHdrTable(hdr):
     try:
         jd = float(hdr[cfg.jd_key])
     except ValueError:
+        print('!!! JD problem !!!')
+        print('{} - not found, try to use JD'.format(cfg.jd_key))
         jd = float(hdr['JD'])
     except KeyError:
-        print('JD problem')
-        raise
+        print('!!! JD problem !!!')
+        print('!!! JD is set to random value!!!')
+        jd = 2450000. + random.random()
 
     for i in xrange(4):  # FIXME
         hdr_table.add_row([jd,
