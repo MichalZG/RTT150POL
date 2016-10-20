@@ -18,6 +18,9 @@ import ConfigParser
 import os
 import sys
 import math
+import matplotlib.pylab as plt
+from matplotlib.colors import LogNorm
+from astropy.stats import gaussian_fwhm_to_sigma
 
 warnings.filterwarnings("ignore", module="matplotlib")
 
@@ -75,39 +78,66 @@ def createMask(star, data_shape):
     return mask_arr
 
 
+def makeProps(data, median, mask, star):
+
+        # FIXME all variables must be in config
+        sigma = 2.0 * gaussian_fwhm_to_sigma    # FWHM = 2.
+        kernel = Gaussian2DKernel(sigma, x_size=3, y_size=3)
+        kernel.normalize()
+        data[mask] = 0
+        segm = detect_sources(data, median*3, npixels=5,
+                              filter_kernel=kernel)
+        props = properties_table(
+            source_properties(data-np.uint64(median), segm),
+            columns=['id', 'xcentroid', 'ycentroid', 'source_sum',
+                     'semimajor_axis_sigma', 'semiminor_axis_sigma',
+                     'orientation'])
+
+        if len(props) > 1:
+            props = findNearestObject(star, props, data.shape)
+
+        return props
+
+
+def findNearestObject(star, props, data_shape):
+    min_dist = max(data_shape)
+    min_dist_id = 0
+    x, y = star
+
+    for prop in props:
+        dist = math.sqrt((x - prop['xcentroid']) ** 2 +
+                         (y - prop['ycentroid']) ** 2)
+
+        if dist < min_dist:
+            min_dist = dist
+            min_dist_id = prop['id']
+
+    return props[min_dist_id-1]
+
+
 def makeApertures(data, stars):
     apertures = []
     masks = [createMask(star, data.shape) for star in stars]
 
-    for i, mask in enumerate(reversed(masks)):
+    for i, mask in enumerate(masks):
         mean, median, std = sigma_clipped_stats(data, mask=mask,
                                                 sigma=1.0, iters=5)
 
         if cfg.calc_center or cfg.calc_aperture:
 
-            from astropy.stats import gaussian_fwhm_to_sigma
-
-            sigma = 2.0 * gaussian_fwhm_to_sigma    # FWHM = 2.
-            kernel = Gaussian2DKernel(sigma, x_size=3, y_size=3)
-            kernel.normalize()
-            masked_data = np.copy(data)
-            masked_data[mask] = 0
-            segm = detect_sources(masked_data, median*2, npixels=5,
-                                  filter_kernel=kernel)
-            props = properties_table(
-                source_properties(data-np.uint64(median), segm))
+            props = makeProps(np.copy(data), median, mask, stars[i])
 
         if cfg.calc_center:
 
-            position = (props[0]['xcentroid'],
-                        props[0]['ycentroid'])
+            position = (props['xcentroid'],
+                        props['ycentroid'])
         else:
             position = stars[i]
 
         if cfg.calc_aperture:
-            a = props[0]['semimajor_axis_sigma'] * cfg.r_multi_ap
-            b = props[0]['semiminor_axis_sigma'] * cfg.r_multi_ap
-            theta = props[0]['orientation']
+            a = props['semimajor_axis_sigma'] * cfg.r_multi_ap
+            b = props['semiminor_axis_sigma'] * cfg.r_multi_ap
+            theta = props['orientation']
             aperture = EllipticalAperture(position, a=a, b=b, theta=theta)
             annulus = EllipticalAnnulus(position,
                                         a_in=a+cfg.r_ann_in,
@@ -126,7 +156,7 @@ def makeApertures(data, stars):
     return apertures
 
 
-def makePhot(data, hdr, stars, plot=True):
+def makePhot(data, hdr, stars, plot=False):
 
     apertures = makeApertures(data, stars)
     out_table = []
@@ -178,9 +208,6 @@ def calcPhotErr(hdr, aperture, phot_table, bkgflux_table):
 
 def makePlot(data, apertures, im_name):
 
-    import matplotlib.pylab as plt
-    from matplotlib.colors import LogNorm
-
     plt.imshow(data, cmap='Greys', origin='lower',
                norm=LogNorm())
     for aperture in apertures:
@@ -189,6 +216,7 @@ def makePlot(data, apertures, im_name):
         area = aperture[0]  # for plot mask area
         area.a, area.b = cfg.r_mask, cfg.r_mask
         area.plot(linewidth=0.2, color='k', ls=':')
+
     plt.savefig(im_name+'.png', dpi=300)
     plt.clf()
 
@@ -293,13 +321,21 @@ def createHdrTable(hdr):
                       dtype=('f8', 'S8', 'f8',
                              'S8', 'S8', 'i'))
 
+    try:
+        jd = float(hdr[cfg.jd_key])
+    except ValueError:
+        jd = float(hdr['JD'])
+    except KeyError:
+        print('JD problem')
+        raise
+
     for i in xrange(4):  # FIXME
-        hdr_table.add_row([float(hdr[cfg.jd_key]),
-                           hdr[cfg.obj_key],
-                           float(hdr[cfg.exp_key]),
-                           hdr[cfg.afilter_key].strip()[-1],
-                           hdr[cfg.bfilter_key].strip().split(' ')[-1],
-                           i+1])
+        hdr_table.add_row([jd,
+                          hdr[cfg.obj_key],
+                          float(hdr[cfg.exp_key]),
+                          hdr[cfg.afilter_key].strip()[-1],
+                          hdr[cfg.bfilter_key].strip().split(' ')[-1],
+                          i+1])
     return hdr_table
 
 
@@ -313,7 +349,7 @@ def main(args):
         bias_data = loadBias(args.bias)
 
     for im in images:
-        print im
+        print(im)
         hdu = fits.open(im, mode='update', ignore_missing_end=True)
 
         if args.bias:
@@ -332,7 +368,7 @@ def main(args):
         hdr = hdu[0].header
 
         hdr_table = createHdrTable(hdr)
-        phot_table = makePhot(data, hdr, stars, plot=args.plot)
+        phot_table = makePhot(data, hdr, stars, args.plot)
         out_table.append(hstack([hdr_table, phot_table]))
 
     saveTable(out_table, args.output)
