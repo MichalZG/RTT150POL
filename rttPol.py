@@ -13,6 +13,7 @@ from astropy.table import hstack, vstack
 from photutils import aperture_photometry
 from astropy.table import Table, Column
 from astropy.stats import sigma_clipped_stats
+from astropy.time import Time as TimeObject 
 import argparse
 import ConfigParser
 import os
@@ -47,6 +48,8 @@ class Config():
         # header
         self.gain_key = config.get('header', 'gain')
         self.jd_key = config.get('header', 'jd')
+        self.date_key = config.get('header', 'date')
+        self.time_key = config.get('header', 'time')
         self.exp_key = config.get('header', 'exp')
         self.obj_key = config.get('header', 'obj')
         self.afilter_key = config.get('header', 'afilter')
@@ -324,6 +327,15 @@ def createHdrTable(hdr):
                       dtype=('f8', 'S8', 'f8',
                              'S8', 'S8', 'i'))
 
+
+    temp_time = TimeObject("T".join([hdr[cfg.date_key], hdr[cfg.time_key]]), format='isot', scale='utc')
+    temp_jd = temp_time.jd
+
+    try:
+        print hdr["JD"], temp_jd, (float(hdr["JD"]) - float(temp_jd)) * 86400
+    except:
+        pass
+
     try:
         jd = float(hdr[cfg.jd_key])
     except ValueError:
@@ -333,7 +345,8 @@ def createHdrTable(hdr):
     except KeyError:
         print('!!! JD problem !!!')
         print('!!! JD is set to random value!!!')
-        jd = 2450000. + random.random()
+#        jd = 2450000. + random.random()
+        jd = temp_jd
 
     for i in xrange(4):  # FIXME
         hdr_table.add_row([jd,
