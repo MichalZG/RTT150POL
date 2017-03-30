@@ -26,6 +26,9 @@ import random
 
 warnings.filterwarnings("ignore", module="matplotlib")
 
+def dupa(arg):
+    if dupa < 2:
+        print('dupa')
 
 class Config():
 
@@ -84,7 +87,7 @@ def createMask(star, data_shape):
 
 def makeProps(data, median, mask, star):
 
-        # FIXME all variables must be in config
+        # FIXME all variables to config 
         sigma = 2.0 * gaussian_fwhm_to_sigma    # FWHM = 2.
         kernel = Gaussian2DKernel(sigma, x_size=3, y_size=3)
         kernel.normalize()
