@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import astropy.io.fits as fits
 import glob
 import numpy as np
@@ -15,7 +19,7 @@ from astropy.table import Table, Column
 from astropy.stats import sigma_clipped_stats
 from astropy.time import Time as TimeObject 
 import argparse
-import ConfigParser
+import configparser
 import os
 import sys
 import math
@@ -34,7 +38,7 @@ class Config():
 
     def __init__(self):
 
-        config = ConfigParser.RawConfigParser()
+        config = configparser.RawConfigParser()
         config.read(os.path.join(
             os.path.dirname(os.path.realpath(__file__)),
             'config.cfg'))
@@ -152,7 +156,7 @@ def makeApertures(data, stars):
                                         a_out=a+cfg.r_ann_out,
                                         b_out=b+cfg.r_ann_out,
                                         theta=theta)
-            print('i:{}, a:{}, b:{}, pos:{},{}').format(i+1, a, b, *position)
+            print(('i:{}, a:{}, b:{}, pos:{},{}').format(i+1, a, b, *position))
         else:
             aperture = CircularAperture(position, r=cfg.r_ap)
             annulus = CircularAnnulus(position,
@@ -335,7 +339,7 @@ def createHdrTable(hdr):
     temp_jd = temp_time.jd
 
     try:
-        print hdr["JD"], temp_jd, (float(hdr["JD"]) - float(temp_jd)) * 86400
+        print(hdr["JD"], temp_jd, (float(hdr["JD"]) - float(temp_jd)) * 86400)
     except:
         pass
 
@@ -343,7 +347,7 @@ def createHdrTable(hdr):
         jd = float(hdr[cfg.jd_key])
     except ValueError:
         print('!!! JD problem !!!')
-        print('{} - not found, try to use JD'.format(cfg.jd_key))
+        print(('{} - not found, try to use JD'.format(cfg.jd_key)))
         jd = float(hdr['JD'])
     except KeyError:
         print('!!! JD problem !!!')
@@ -351,7 +355,7 @@ def createHdrTable(hdr):
 #        jd = 2450000. + random.random()
         jd = temp_jd
 
-    for i in xrange(4):  # FIXME
+    for i in range(4):  # FIXME
         hdr_table.add_row([jd,
                           hdr[cfg.obj_key],
                           float(hdr[cfg.exp_key]),
@@ -377,12 +381,12 @@ def main(args):
         if args.bias:
             try:
                 hdu[0].header['BIASCORR']
-                print('%s - Bias correction already done' % im)
+                print(('%s - Bias correction already done' % im))
 
             except KeyError:
                 hdu[0].data = hdu[0].data - bias_data
                 hdu[0].header['BIASCORR'] = 'True'
-                print('%s - Bias correction done' % im)
+                print(('%s - Bias correction done' % im))
 
             hdu.flush()
 
