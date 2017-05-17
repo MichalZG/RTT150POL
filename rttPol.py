@@ -30,10 +30,6 @@ import random
 
 warnings.filterwarnings("ignore", module="matplotlib")
 
-def dupa(arg):
-    if dupa < 2:
-        print('dupa')
-
 class Config():
 
     def __init__(self):
