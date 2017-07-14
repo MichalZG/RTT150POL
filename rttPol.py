@@ -331,7 +331,8 @@ def createHdrTable(hdr):
                              'S8', 'S8', 'i'))
 
 
-    temp_time = TimeObject("T".join([hdr[cfg.date_key].strip(), hdr[cfg.time_key].strip()]),
+    temp_time = TimeObject("T".join([hdr[cfg.date_key].replace(" ", ""),
+                                     hdr[cfg.time_key].replace(" ", "")]),
                            format='isot', scale='utc')
     temp_jd = temp_time.jd
 
