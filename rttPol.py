@@ -298,7 +298,7 @@ def loadImages():
 
     images = sorted(glob.glob(
         os.path.join(os.path.curdir, cfg.images)))
-    images = [name for name in images if len(name.split('.')) < 3]
+    # images = [name for name in images if len(name.split('.')) < 3]
 
     return images
 
@@ -331,7 +331,8 @@ def createHdrTable(hdr):
                              'S8', 'S8', 'i'))
 
 
-    temp_time = TimeObject("T".join([hdr[cfg.date_key], hdr[cfg.time_key]]), format='isot', scale='utc')
+    temp_time = TimeObject("T".join([hdr[cfg.date_key].strip(), hdr[cfg.time_key].strip()]),
+                           format='isot', scale='utc')
     temp_jd = temp_time.jd
 
     try:
